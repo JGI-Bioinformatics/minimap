@@ -345,8 +345,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		ks_init(&line);
 		for (i = 0; i < s->n_seq; ++i) {
 			bseq1_t *t = &s->seq[i];
-			ks_reset(&line);
 			for (j = 0; j < s->n_reg[i]; ++j) {
+				ks_reset(&line);
 				mm_reg1_t *r = &s->reg[i][j];
 				if (r->len < p->opt->min_match) continue;
 				ksprintf(&line, "%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
