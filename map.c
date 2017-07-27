@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "bseq.h"
 #include "kvec.h"
+#include "kstring.h"
 #include "minimap.h"
 #include "sdust.h"
 
@@ -340,20 +341,33 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		const mm_idx_t *mi = p->mi;
 		for (i = 0; i < p->n_threads; ++i) mm_tbuf_destroy(s->buf[i]);
 		free(s->buf);
+		kstring_t line;
+		ks_init(&line);
 		for (i = 0; i < s->n_seq; ++i) {
 			bseq1_t *t = &s->seq[i];
+			ks_reset(&line);
 			for (j = 0; j < s->n_reg[i]; ++j) {
 				mm_reg1_t *r = &s->reg[i][j];
 				if (r->len < p->opt->min_match) continue;
-				printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
-				if (mi->name) fputs(mi->name[r->rid], stdout);
-				else printf("%d", r->rid + 1);
-				printf("\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d\n", mi->len[r->rid], r->rs, r->re, r->len,
+				ksprintf(&line, "%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
+				//printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
+				//if (mi->name) fputs(mi->name[r->rid], stdout);
+				//else printf("%d", r->rid + 1);
+				//printf("\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d\n", mi->len[r->rid], r->rs, r->re, r->len,
+				//		r->re - r->rs > r->qe - r->qs? r->re - r->rs : r->qe - r->qs, r->cnt);
+				if (mi->name) kputs(mi->name[r->rid], &line);
+				else ksprintf(&line, "%d", r->rid + 1);
+				ksprintf(&line, "\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d", mi->len[r->rid], r->rs, r->re, r->len,
 						r->re - r->rs > r->qe - r->qs? r->re - r->rs : r->qe - r->qs, r->cnt);
+				//if (outputpos) {
+				//}
+				kputc('\n', &line);
+				printf(line.s);
 			}
 			free(s->reg[i]);
 			free(s->seq[i].seq); free(s->seq[i].name);
 		}
+		ks_destroy(&line);
 		free(s->reg); free(s->n_reg); free(s->seq);
 		free(s);
 	}
