@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:NOg:I:d:lRPST:m:L:Dx:")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:NOg:I:d:lRPST:m:L:Dx:M")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -73,7 +73,7 @@ int main(int argc, char *argv[])
 				opt.merge_frac = 0.0;
 				w = 5;
 			}
-		}
+		} else if (c =='M') opt.flag |= MM_F_OUT_MINI;
 	}
 	if (w < 0) w = (int)(.6666667 * k + .499);
 
@@ -104,6 +104,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "               ava10k: -Sw5 -L100 -m0 (PacBio/ONT all-vs-all read mapping)\n");
 		fprintf(stderr, "  Input/Output:\n");
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
+		fprintf(stderr, "    -M         output minimizer positions on query and references in aux fields\n");
 //		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [100M]\n");
 //		fprintf(stderr, "    -v INT     verbose level [%d]\n", mm_verbose);
 //		fprintf(stderr, "    -N         use integer as target names\n");
