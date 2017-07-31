@@ -338,7 +338,8 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
-	int i, j, k, m;
+	int i, j, k;
+	size_t m;
 	pipeline_t *p = (pipeline_t*)shared;
 	if (step == 0) { // step 0: read sequences
 		step_t *s;
@@ -371,21 +372,22 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			for (j = 0; j < s->n_reg[i]; ++j) {
 				ks_reset(&line);
 				mm_reg1_t *r = &s->reg[i][j];
-				if (r->len < p->opt->min_match) continue;
+				if (r->len < p->opt->min_match) { m += r->cnt; continue; }
 				ksprintf(&line, "%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
 				if (mi->name) kputs(mi->name[r->rid], &line);
 				else ksprintf(&line, "%d", r->rid + 1);
 				ksprintf(&line, "\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d", mi->len[r->rid], r->rs, r->re, r->len,
 						r->re - r->rs > r->qe - r->qs? r->re - r->rs : r->qe - r->qs, r->cnt);
 				if (p->opt->flag&MM_F_OUT_MINI) {
+					kputs("\tcq:i", &line);
+					for(k=0; k < r->cnt; k++) {
+						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_qpos.a[m+k]);
+					}
 					kputs("\tcr:i", &line);
 					for(k=0; k < r->cnt; k++) {
 						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_rpos.a[m+k]);
 					}
 					kputs("\tcq:i", &line);
-					for(k=0; k < r->cnt; k++) {
-						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_qpos.a[m+k]);
-					}
 					m += r->cnt;
 				}
 				kputc('\n', &line);
