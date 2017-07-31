@@ -27,6 +27,8 @@ struct mm_tbuf_s { // per-thread buffer
 	mm128_v coef; // Hough transform coefficient
 	mm128_v intv; // intervals on sorted coef
 	uint32_v reg2mini;
+	uint32_v reg2qmini;
+	uint32_v reg2rmini;
 	uint32_v rep_aux;
 	sdust_buf_t *sdb;
 	// the following are for computing LIS
@@ -48,7 +50,7 @@ mm_tbuf_t *mm_tbuf_init()
 void mm_tbuf_destroy(mm_tbuf_t *b)
 {
 	if (b == 0) return;
-	free(b->mini.a); free(b->coef.a); free(b->intv.a); free(b->reg.a); free(b->reg2mini.a); free(b->rep_aux.a);
+	free(b->mini.a); free(b->coef.a); free(b->intv.a); free(b->reg.a); free(b->reg2mini.a); free(b->reg2qmini.a); free(b->reg2rmini.a); free(b->rep_aux.a);
 	free(b->a); free(b->b); free(b->p);
 	sdust_buf_destroy(b->sdb);
 	free(b);
@@ -89,7 +91,7 @@ static void drop_rep(mm_tbuf_t *b, int min_cnt)
 	b->reg.n = n;
 }
 
-static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
+static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap, int flag)
 {
 	int i, j, l_lis, rid = -1, rev = 0, start = b->intv.a[which].y, end = start + b->intv.a[which].x;
 
@@ -138,6 +140,13 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 					int jj = b->a[b->b[j]]>>32;
 					b->mini.a[jj].y += 1ULL<<32;
 					kv_push(uint32_t, b->reg2mini, jj); // keep minimizer<=>reg mapping for derep
+				}
+				if (flag&MM_F_OUT_MINI) {
+					// keep the reference and query minimizer position mapping
+					for (j = start; j < i; ++j) { 
+						kv_push(uint32_t, b->reg2qmini, ((uint32_t)b->mini.a[b->a[b->b[j]]>>32].y>>1) - (k - 1));
+						kv_push(uint32_t, b->reg2rmini, rev? (uint32_t)b->a[b->b[i-1-j]] : (uint32_t)b->a[b->b[j]]);
+					}
 				}
 				for (j = start; j < i; ++j) { // compute ->len
 					uint32_t q = ((uint32_t)b->mini.a[b->a[b->b[j]]>>32].y>>1) - (k - 1);
@@ -218,7 +227,7 @@ static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, f
 
 	// generate hits, starting from the largest interval
 	b->reg2mini.n = 0;
-	for (i = b->intv.n - 1; i >= 0; --i) proc_intv(b, i, k, min_cnt, max_gap);
+	for (i = b->intv.n - 1; i >= 0; --i) proc_intv(b, i, k, min_cnt, max_gap, flag);
 
 	// post repeat removal
 	if (!(flag&MM_F_WITH_REP)) drop_rep(b, min_cnt);
@@ -293,34 +302,47 @@ typedef struct {
 
 typedef struct {
 	const pipeline_t *p;
-    int n_seq;
+	int n_seq;
 	bseq1_t *seq;
 	int *n_reg;
 	mm_reg1_t **reg;
+	uint32_v mini_rpos;
+	uint32_v mini_qpos;
 	mm_tbuf_t **buf;
 } step_t;
 
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
-    step_t *step = (step_t*)_data;
+	step_t *step = (step_t*)_data;
 	const mm_reg1_t *regs;
-	int n_regs;
+	int n_regs, j;
 
 	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, step->buf[tid], step->p->opt, step->seq[i].name);
 	step->n_reg[i] = n_regs;
 	if (n_regs > 0) {
 		step->reg[i] = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
 		memcpy(step->reg[i], regs, n_regs * sizeof(mm_reg1_t));
+		if (step->p->opt->flag & MM_F_OUT_MINI) {
+			// copy the minimizer positions
+			for(j=0; j < step->buf[tid]->reg2qmini.n; j++) {
+				kv_push(uint32_t, step->mini_qpos, step->buf[tid]->reg2qmini.a[j]);
+			}
+			step->buf[tid]->reg2qmini.n=0;
+			for(j=0; j < step->buf[tid]->reg2rmini.n; j++) {
+				kv_push(uint32_t, step->mini_rpos, step->buf[tid]->reg2rmini.a[j]);
+			}
+			step->buf[tid]->reg2rmini.n=0;
+		}
 	}
 }
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
-	int i, j;
-    pipeline_t *p = (pipeline_t*)shared;
-    if (step == 0) { // step 0: read sequences
-        step_t *s;
-        s = (step_t*)calloc(1, sizeof(step_t));
+	int i, j, k, m;
+	pipeline_t *p = (pipeline_t*)shared;
+	if (step == 0) { // step 0: read sequences
+		step_t *s;
+	        s = (step_t*)calloc(1, sizeof(step_t));
 		s->seq = bseq_read(p->fp, p->batch_size, &s->n_seq);
 		if (s->seq) {
 			s->p = p;
@@ -333,14 +355,15 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			s->reg = (mm_reg1_t**)calloc(s->n_seq, sizeof(mm_reg1_t*));
 			return s;
 		} else free(s);
-    } else if (step == 1) { // step 1: map
+	} else if (step == 1) { // step 1: map
 		kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_seq);
 		return in;
-    } else if (step == 2) { // step 2: output
-        step_t *s = (step_t*)in;
+	} else if (step == 2) { // step 2: output
+		step_t *s = (step_t*)in;
 		const mm_idx_t *mi = p->mi;
 		for (i = 0; i < p->n_threads; ++i) mm_tbuf_destroy(s->buf[i]);
 		free(s->buf);
+		m = 0;
 		kstring_t line;
 		ks_init(&line);
 		for (i = 0; i < s->n_seq; ++i) {
@@ -350,17 +373,21 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				mm_reg1_t *r = &s->reg[i][j];
 				if (r->len < p->opt->min_match) continue;
 				ksprintf(&line, "%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
-				//printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
-				//if (mi->name) fputs(mi->name[r->rid], stdout);
-				//else printf("%d", r->rid + 1);
-				//printf("\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d\n", mi->len[r->rid], r->rs, r->re, r->len,
-				//		r->re - r->rs > r->qe - r->qs? r->re - r->rs : r->qe - r->qs, r->cnt);
 				if (mi->name) kputs(mi->name[r->rid], &line);
 				else ksprintf(&line, "%d", r->rid + 1);
 				ksprintf(&line, "\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d", mi->len[r->rid], r->rs, r->re, r->len,
 						r->re - r->rs > r->qe - r->qs? r->re - r->rs : r->qe - r->qs, r->cnt);
-				//if (outputpos) {
-				//}
+				if (p->opt->flag&MM_F_OUT_MINI) {
+					kputs("\tcr:i", &line);
+					for(k=0; k < r->cnt; k++) {
+						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_rpos.a[m+k]);
+					}
+					kputs("\tcq:i", &line);
+					for(k=0; k < r->cnt; k++) {
+						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_qpos.a[m+k]);
+					}
+					m += r->cnt;
+				}
 				kputc('\n', &line);
 				printf(line.s);
 			}
@@ -369,9 +396,10 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		}
 		ks_destroy(&line);
 		free(s->reg); free(s->n_reg); free(s->seq);
+		kv_destroy(s->mini_rpos); kv_destroy(s->mini_qpos);
 		free(s);
 	}
-    return 0;
+	return 0;
 }
 
 int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int n_threads, int tbatch_size)
