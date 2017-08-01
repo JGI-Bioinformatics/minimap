@@ -50,7 +50,7 @@ mm_tbuf_t *mm_tbuf_init()
 void mm_tbuf_destroy(mm_tbuf_t *b)
 {
 	if (b == 0) return;
-	free(b->mini.a); free(b->coef.a); free(b->intv.a); free(b->reg.a); free(b->reg2mini.a); free(b->reg2qmini.a); free(b->reg2rmini.a); free(b->rep_aux.a);
+	kv_destroy(b->mini); kv_destroy(b->coef); kv_destroy(b->intv); kv_destroy(b->reg); kv_destroy(b->reg2mini); kv_destroy(b->reg2qmini); kv_destroy(b->reg2rmini); kv_destroy(b->rep_aux);
 	free(b->a); free(b->b); free(b->p);
 	sdust_buf_destroy(b->sdb);
 	free(b);
@@ -306,8 +306,8 @@ typedef struct {
 	bseq1_t *seq;
 	int *n_reg;
 	mm_reg1_t **reg;
-	uint32_v mini_rpos;
-	uint32_v mini_qpos;
+	uint32_v *mini_rpos;
+	uint32_v *mini_qpos;
 	mm_tbuf_t **buf;
 } step_t;
 
@@ -315,7 +315,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
 	step_t *step = (step_t*)_data;
 	const mm_reg1_t *regs;
-	int n_regs, j;
+	int n_regs;
 
 	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, step->buf[tid], step->p->opt, step->seq[i].name);
 	step->n_reg[i] = n_regs;
@@ -323,15 +323,11 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 		step->reg[i] = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
 		memcpy(step->reg[i], regs, n_regs * sizeof(mm_reg1_t));
 		if (step->p->opt->flag & MM_F_OUT_MINI) {
-			// copy the minimizer positions
-			for(j=0; j < step->buf[tid]->reg2qmini.n; j++) {
-				kv_push(uint32_t, step->mini_qpos, step->buf[tid]->reg2qmini.a[j]);
-			}
-			step->buf[tid]->reg2qmini.n=0;
-			for(j=0; j < step->buf[tid]->reg2rmini.n; j++) {
-				kv_push(uint32_t, step->mini_rpos, step->buf[tid]->reg2rmini.a[j]);
-			}
-			step->buf[tid]->reg2rmini.n=0;
+			// move the minimizer positions
+			memcpy( &(step->mini_qpos[i]), &(step->buf[tid]->reg2qmini), sizeof(uint32_v));
+			memcpy( &(step->mini_rpos[i]), &(step->buf[tid]->reg2rmini), sizeof(uint32_v));
+			memset( &(step->buf[tid]->reg2qmini), 0, sizeof(uint32_v));
+			memset( &(step->buf[tid]->reg2rmini), 0, sizeof(uint32_v));
 		}
 	}
 }
@@ -354,6 +350,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				s->buf[i] = mm_tbuf_init();
 			s->n_reg = (int*)calloc(s->n_seq, sizeof(int));
 			s->reg = (mm_reg1_t**)calloc(s->n_seq, sizeof(mm_reg1_t*));
+			s->mini_qpos = (uint32_v*)calloc(s->n_seq, sizeof(uint32_v));
+			s->mini_rpos = (uint32_v*)calloc(s->n_seq, sizeof(uint32_v));
 			return s;
 		} else free(s);
 	} else if (step == 1) { // step 1: map
@@ -364,10 +362,10 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		const mm_idx_t *mi = p->mi;
 		for (i = 0; i < p->n_threads; ++i) mm_tbuf_destroy(s->buf[i]);
 		free(s->buf);
-		m = 0;
 		kstring_t line;
 		ks_init(&line);
 		for (i = 0; i < s->n_seq; ++i) {
+			m = 0;
 			bseq1_t *t = &s->seq[i];
 			for (j = 0; j < s->n_reg[i]; ++j) {
 				ks_reset(&line);
@@ -381,11 +379,11 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				if (p->opt->flag&MM_F_OUT_MINI) {
 					kputs("\tcq:i", &line);
 					for(k=0; k < r->cnt; k++) {
-						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_qpos.a[m+k]);
+						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_qpos[i].a[m+k]);
 					}
 					kputs("\tcr:i", &line);
 					for(k=0; k < r->cnt; k++) {
-						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_rpos.a[m+k]);
+						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_rpos[i].a[m+k]);
 					}
 					kputs("\tcq:i", &line);
 					m += r->cnt;
@@ -395,10 +393,12 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			}
 			free(s->reg[i]);
 			free(s->seq[i].seq); free(s->seq[i].name);
+			kv_destroy(s->mini_qpos[i]);
+			kv_destroy(s->mini_rpos[i]);
 		}
 		ks_destroy(&line);
 		free(s->reg); free(s->n_reg); free(s->seq);
-		kv_destroy(s->mini_rpos); kv_destroy(s->mini_qpos);
+		free(s->mini_rpos); free(s->mini_qpos);
 		free(s);
 	}
 	return 0;
