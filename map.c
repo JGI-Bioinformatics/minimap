@@ -145,7 +145,15 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap, 
 					// keep the reference and query minimizer position mapping
 					for (j = start; j < i; ++j) { 
 						kv_push(uint32_t, b->reg2qmini, ((uint32_t)b->mini.a[b->a[b->b[j]]>>32].y>>1) - (k - 1));
-						kv_push(uint32_t, b->reg2rmini, rev? (uint32_t)b->a[b->b[i-1-j]] : (uint32_t)b->a[b->b[j]]);
+					}
+					if (rev) {
+						for (j = i-1; j >= start; --j) { 
+							kv_push(uint32_t, b->reg2rmini, (uint32_t)b->a[b->b[i-1-j]] - k + 1);
+						}
+					} else {
+						for (j = start; j < i; ++j) {
+							kv_push(uint32_t, b->reg2rmini, (uint32_t)b->a[b->b[j]]);
+						}
 					}
 				}
 				for (j = start; j < i; ++j) { // compute ->len
