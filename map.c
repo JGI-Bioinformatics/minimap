@@ -148,11 +148,11 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap, 
 					}
 					if (rev) {
 						for (j = i-1; j >= start; --j) { 
-							kv_push(uint32_t, b->reg2rmini, (uint32_t)b->a[b->b[i-1-j]] - k + 1);
+							kv_push(uint32_t, b->reg2rmini, (uint32_t)b->a[b->b[i-1-j]] - (k - 1));
 						}
 					} else {
 						for (j = start; j < i; ++j) {
-							kv_push(uint32_t, b->reg2rmini, (uint32_t)b->a[b->b[j]]);
+							kv_push(uint32_t, b->reg2rmini, (uint32_t)b->a[b->b[j]] - (k - 1));
 						}
 					}
 				}
@@ -393,7 +393,6 @@ static void *worker_pipeline(void *shared, int step, void *in)
 					for(k=0; k < r->cnt; k++) {
 						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_rpos[i].a[m+k]);
 					}
-					kputs("\tcq:i", &line);
 					m += r->cnt;
 				}
 				kputc('\n', &line);
