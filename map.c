@@ -385,13 +385,13 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				ksprintf(&line, "\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d", mi->len[r->rid], r->rs, r->re, r->len,
 						r->re - r->rs > r->qe - r->qs? r->re - r->rs : r->qe - r->qs, r->cnt);
 				if (p->opt->flag&MM_F_OUT_MINI) {
-					kputs("\tcq:i", &line);
+					kputs("\tcq:B:", &line);
 					for(k=0; k < r->cnt; k++) {
-						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_qpos[i].a[m+k]);
+						ksprintf(&line, "%c%d", (k==0?'I':','), (int) s->mini_qpos[i].a[m+k]);
 					}
-					kputs("\tcr:i", &line);
+					kputs("\tcr:B:", &line);
 					for(k=0; k < r->cnt; k++) {
-						ksprintf(&line, "%c%d", (k==0?':':','), (int) s->mini_rpos[i].a[m+k]);
+						ksprintf(&line, "%c%d", (k==0?'I':','), (int) s->mini_rpos[i].a[m+k]);
 					}
 					m += r->cnt;
 				}
