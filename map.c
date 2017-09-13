@@ -349,6 +349,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		step_t *s;
 	        s = (step_t*)calloc(1, sizeof(step_t));
 		s->seq = bseq_read(p->fp, p->batch_size, &s->n_seq);
+		fprintf(stderr, "[M::%s] Read %ld sequences:\n", __func__, (long) s->n_seq);
 		if (s->seq) {
 			s->p = p;
 			for (i = 0; i < s->n_seq; ++i)
@@ -364,6 +365,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		} else free(s);
 	} else if (step == 1) { // step 1: map
 		kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_seq);
+		fprintf(stderr, "[M::%s] Processed %ld sequences\n", __func__, (long) ((step_t*)in)->n_seq);
 		return in;
 	} else if (step == 2) { // step 2: output
 		step_t *s = (step_t*)in;
@@ -407,6 +409,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		free(s->reg); free(s->n_reg); free(s->seq);
 		free(s->mini_rpos); free(s->mini_qpos);
 		free(s);
+		fprintf(stderr, "[M::%s] Output %ld sequence mappings\n", __func__, (long) s->n_seq);
 	}
 	return 0;
 }

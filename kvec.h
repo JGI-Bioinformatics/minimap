@@ -48,7 +48,10 @@ int main() {
 #ifndef AC_KVEC_H
 #define AC_KVEC_H
 
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <errno.h>
 
 #define kv_roundup32(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
 
@@ -65,6 +68,7 @@ int main() {
 			(v).m = (s); \
 			kv_roundup32((v).m); \
 			(v).a = (type*)realloc((v).a, sizeof(type) * (v).m); \
+                        if (!(v).a) { printf("Failed to reallocate %ld bytes. (%d %s)\n", (long) (v).m, errno, strerror(errno)); } \
 		} \
 	} while (0)
 
@@ -78,6 +82,7 @@ int main() {
 		if ((v).n == (v).m) {										\
 			(v).m = (v).m? (v).m<<1 : 2;							\
 			(v).a = (type*)realloc((v).a, sizeof(type) * (v).m);	\
+                        if (!(v).a) { printf("Failed to reallocate %ld bytes. (%d %s)\n", (long) (v).m, errno, strerror(errno)); } \
 		}															\
 		(v).a[(v).n++] = (x);										\
 	} while (0)
@@ -86,6 +91,7 @@ int main() {
 		if ((v).n == (v).m) { \
 			(v).m = (v).m? (v).m<<1 : 2; \
 			(v).a = (type*)realloc((v).a, sizeof(type) * (v).m); \
+                        if (!(v).a) { printf("Failed to reallocate %ld bytes. (%d %s)\n", (long) (v).m, errno, strerror(errno)); } \
 		} \
 		*(p) = &(v).a[(v).n++]; \
 	} while (0)
