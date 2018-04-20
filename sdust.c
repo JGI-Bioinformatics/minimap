@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdio.h>
+#include "kalloc.h"
 #include "kdq.h"
 #include "kvec.h"
 #include "sdust.h"
@@ -46,13 +47,16 @@ struct sdust_buf_s {
 	kdq_t(int) *w;
 	perf_intv_v P; // the list of perfect intervals for the current window, sorted by descending start and then by ascending finish
 	uint64_v res;  // the result
+	void *km;      // memory pool
 };
 
-sdust_buf_t *sdust_buf_init(void)
+sdust_buf_t *sdust_buf_init(void *km)
 {
 	sdust_buf_t *buf;
-	buf = (sdust_buf_t*)calloc(1, sizeof(sdust_buf_t));
-	buf->w = kdq_init(int);
+	buf = (sdust_buf_t*)kcalloc(km, 1, sizeof(sdust_buf_t));
+	buf->km = km;
+	buf->w = kdq_init(int, buf->km);
+	kdq_resize(int, buf->w, 8);
 	return buf;
 }
 
@@ -60,8 +64,7 @@ void sdust_buf_destroy(sdust_buf_t *buf)
 {
 	if (buf == 0) return;
 	kdq_destroy(int, buf->w);
-	free(buf->P.a); free(buf->res.a);
-	free(buf);
+	kfree(buf->km, buf->P.a); kfree(buf->km, buf->res.a); kfree(buf->km, buf);
 }
 
 static inline void shift_window(int t, kdq_t(int) *w, int T, int W, int *L, int *rw, int *rv, int *cw, int *cv)
@@ -86,7 +89,7 @@ static inline void shift_window(int t, kdq_t(int) *w, int T, int W, int *L, int 
 	}
 }
 
-static inline void save_masked_regions(uint64_v *res, perf_intv_v *P, int start)
+static inline void save_masked_regions(void *km, uint64_v *res, perf_intv_v *P, int start)
 {
 	int i, saved = 0;
 	perf_intv_t *p;
@@ -97,12 +100,12 @@ static inline void save_masked_regions(uint64_v *res, perf_intv_v *P, int start)
 		if (p->start <= f) // if overlapping with or adjacent to the previous interval
 			saved = 1, res->a[res->n - 1] = (uint64_t)s<<32 | (f > p->finish? f : p->finish);
 	}
-	if (!saved) kv_push(uint64_t, *res, (uint64_t)p->start<<32|p->finish);
+	if (!saved) kv_push(uint64_t, km, *res, (uint64_t)p->start<<32|p->finish);
 	for (i = P->n - 1; i >= 0 && P->a[i].start < start; --i); // remove perfect intervals that have falled out of the window
 	P->n = i + 1;
 }
 
-static void find_perfect(perf_intv_v *P, const kdq_t(int) *w, int T, int start, int L, int rv, const int *cv)
+static void find_perfect(void *km, perf_intv_v *P, const kdq_t(int) *w, int T, int start, int L, int rv, const int *cv)
 {
 	int c[SD_WTOT], r = rv, i, max_r = 0, max_l = 0;
 	memcpy(c, cv, SD_WTOT * sizeof(int));
@@ -118,7 +121,7 @@ static void find_perfect(perf_intv_v *P, const kdq_t(int) *w, int T, int start, 
 			}
 			if (max_r == 0 || new_r * max_l >= max_r * new_l) { // then insert
 				max_r = new_r, max_l = new_l;
-				if (P->n == P->m) kv_resize(perf_intv_t, *P, P->n + 1);
+				if (P->n == P->m) kv_resize(perf_intv_t, km, *P, P->n + 1);
 				memmove(&P->a[j+1], &P->a[j], (P->n - j) * sizeof(perf_intv_t)); // make room
 				++P->n;
 				P->a[j].start = i + start, P->a[j].finish = kdq_size(w) + (SD_WLEN - 1) + start;
@@ -145,14 +148,14 @@ const uint64_t *sdust_core(const uint8_t *seq, int l_seq, int T, int W, int *n, 
 			++l, t = (t<<2 | b) & SD_WMSK;
 			if (l >= SD_WLEN) { // we have seen a word
 				start = (l - W > 0? l - W : 0) + (i + 1 - l); // set the start of the current window
-				save_masked_regions(&buf->res, &buf->P, start); // save intervals falling out of the current window?
+				save_masked_regions(buf->km, &buf->res, &buf->P, start); // save intervals falling out of the current window?
 				shift_window(t, buf->w, T, W, &L, &rw, &rv, cw, cv);
 				if (rw * 10 > L * T)
-					find_perfect(&buf->P, buf->w, T, start, L, rv, cv);
+					find_perfect(buf->km, &buf->P, buf->w, T, start, L, rv, cv);
 			}
 		} else { // N or the end of sequence; N effectively breaks input into pieces of independent sequences
 			start = (l - W + 1 > 0? l - W + 1 : 0) + (i + 1 - l);
-			while (buf->P.n) save_masked_regions(&buf->res, &buf->P, start++); // clear up unsaved perfect intervals
+			while (buf->P.n) save_masked_regions(buf->km, &buf->res, &buf->P, start++); // clear up unsaved perfect intervals
 			l = t = 0;
 		}
 	}
@@ -160,11 +163,11 @@ const uint64_t *sdust_core(const uint8_t *seq, int l_seq, int T, int W, int *n, 
 	return buf->res.a;
 }
 
-uint64_t *sdust(const uint8_t *seq, int l_seq, int T, int W, int *n)
+uint64_t *sdust(void *km, const uint8_t *seq, int l_seq, int T, int W, int *n)
 {
 	uint64_t *ret;
 	sdust_buf_t *buf;
-	buf = sdust_buf_init();
+	buf = sdust_buf_init(km);
 	ret = (uint64_t*)sdust_core(seq, l_seq, T, W, n, buf);
 	buf->res.a = 0;
 	sdust_buf_destroy(buf);
@@ -174,7 +177,7 @@ uint64_t *sdust(const uint8_t *seq, int l_seq, int T, int W, int *n)
 #ifdef _SDUST_MAIN
 #include <zlib.h>
 #include <stdio.h>
-#include <unistd.h>
+#include "getopt.h"
 #include "kseq.h"
 KSEQ_INIT(gzFile, gzread)
 
@@ -197,7 +200,7 @@ int main(int argc, char *argv[])
 	while (kseq_read(ks) >= 0) {
 		uint64_t *r;
 		int i, n;
-		r = sdust((uint8_t*)ks->seq.s, -1, T, W, &n);
+		r = sdust(0, (uint8_t*)ks->seq.s, -1, T, W, &n);
 		for (i = 0; i < n; ++i)
 			printf("%s\t%d\t%d\n", ks->name.s, (int)(r[i]>>32), (int)r[i]);
 		free(r);

@@ -30,6 +30,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 typedef struct {
 	void *left, *right;
@@ -38,32 +39,23 @@ typedef struct {
 
 #define KSORT_SWAP(type_t, a, b) { register type_t t=(a); (a)=(b); (b)=t; }
 
-#define KSORT_INIT(name, type_t, __sort_lt)								\
-	size_t ks_lis_##name(size_t n, const type_t *a, size_t *b, size_t *_p) \
-	{ /* translated from: http://www.algorithmist.com/index.php/Longest_Increasing_Subsequence.cpp */ \
-		size_t i, u, v, *top = b, *p; \
-		if (n == 0) return 0; \
-		p = _p? _p : (size_t*)calloc(n, sizeof(size_t)); \
-		*top++ = 0; \
-		for (i = 1; i < n; i++) { \
-			if (__sort_lt(a[*(top-1)], a[i])) { \
-				p[i] = *(top-1); \
-				*top++ = i; \
-				continue; \
-			} \
-			for (u = 0, v = top - b - 1; u < v;) { \
-				size_t c = (u + v) >> 1; \
-				if (__sort_lt(a[b[c]], a[i])) u = c + 1; \
-				else v = c; \
-			} \
-			if (__sort_lt(a[i], a[b[u]])) { \
-				if (u > 0) p[i] = b[u-1]; \
-				b[u] = i; \
-			} \
+#define KSORT_INIT(name, type_t, __sort_lt) \
+	void ks_heapdown_##name(size_t i, size_t n, type_t l[]) \
+	{ \
+		size_t k = i; \
+		type_t tmp = l[i]; \
+		while ((k = (k << 1) + 1) < n) { \
+			if (k != n - 1 && __sort_lt(l[k], l[k+1])) ++k; \
+			if (__sort_lt(l[k], tmp)) break; \
+			l[i] = l[k]; i = k; \
 		} \
-		for (u = top - b, v = *(top-1); u--; v = p[v]) b[u] = v; \
-		if (!_p) free(p); \
-		return top - b; \
+		l[i] = tmp; \
+	} \
+	void ks_heapmake_##name(size_t lsize, type_t l[]) \
+	{ \
+		size_t i; \
+		for (i = (lsize >> 1) - 1; i != (size_t)(-1); --i) \
+			ks_heapdown_##name(i, lsize, l); \
 	} \
 	type_t ks_ksmall_##name(size_t n, type_t arr[], size_t kk)			\
 	{																	\
@@ -104,6 +96,7 @@ typedef const char *ksstr_t;
 #define KSORT_INIT_STR KSORT_INIT(str, ksstr_t, ks_lt_str)
 
 #define RS_MIN_SIZE 64
+#define RS_MAX_BITS 8
 
 #define KRADIX_SORT_INIT(name, rstype_t, rskey, sizeof_key) \
 	typedef struct { \
@@ -124,7 +117,8 @@ typedef const char *ksstr_t;
 	{ \
 		rstype_t *i; \
 		int size = 1<<n_bits, m = size - 1; \
-		rsbucket_##name##_t *k, b[size], *be = b + size; \
+		rsbucket_##name##_t *k, b[1<<RS_MAX_BITS], *be = b + size; \
+		assert(n_bits <= RS_MAX_BITS); \
 		for (k = b; k != be; ++k) k->b = k->e = beg; \
 		for (i = beg; i != end; ++i) ++b[rskey(*i)>>s&m].e; \
 		for (k = b + 1; k != be; ++k) \
@@ -153,7 +147,7 @@ typedef const char *ksstr_t;
 	void radix_sort_##name(rstype_t *beg, rstype_t *end) \
 	{ \
 		if (end - beg <= RS_MIN_SIZE) rs_insertsort_##name(beg, end); \
-		else rs_sort_##name(beg, end, 8, sizeof_key * 8 - 8); \
+		else rs_sort_##name(beg, end, RS_MAX_BITS, (sizeof_key - 1) * RS_MAX_BITS); \
 	}
 
 #endif

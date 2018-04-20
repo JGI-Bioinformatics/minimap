@@ -1,3 +1,8 @@
+.cproject
+.project
 .*.swp
-*.o
 *.a
+*.o
+*.dSYM
+minimap2
+mappy.c
